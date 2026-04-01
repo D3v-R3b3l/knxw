@@ -22,12 +22,33 @@ interface Agent {
   name: string;
   description: string;
   phase: number;
-  status: "active" | "ready" | "pending";
+  status: "active" | "ready" | "pending" | "running" | "idle" | "error";
   icon: React.ReactNode;
   color: string;
   dailyOutput: string;
   unitEconomics: string;
   activatesAt: string;
+}
+
+interface BackendAgent {
+  id: string;
+  name: string;
+  description: string;
+  phase: number;
+  status: string;
+  last_run_at: string | null;
+  created_at: string;
+}
+
+interface SystemStatus {
+  status: string;
+  openai_configured: boolean;
+  wavespeed_configured: boolean;
+  agents: number;
+  logs: number;
+  products: number;
+  trends: number;
+  running_agents: string[];
 }
 
 interface SetupStep {
@@ -259,7 +280,7 @@ const ARCHITECTURE_LAYERS = [
   },
 ];
 
-// ─── Log Feed Types & Data ───────────────────────────────────────────────────
+// ─── Log Feed Types ──────────────────────────────────────────────────────────
 
 type LogLevel = "info" | "success" | "warn" | "error" | "action";
 
@@ -274,95 +295,19 @@ interface LogEntry {
   detail?: string;
 }
 
-const LOG_TEMPLATES: Record<string, { level: LogLevel; messages: Array<{ msg: string; detail?: string }> }[]> = {
-  trend: [
-    { level: "info",    messages: [{ msg: "Scanning Google Trends for niche opportunities...", detail: "Querying 47 seed keywords across 12 categories" }] },
-    { level: "success", messages: [{ msg: "Trend detected: 'AI coloring books for adults' — score 91/100", detail: "Velocity: +340% WoW · Competition: Low · Est. monthly revenue: $2,100" }] },
-    { level: "success", messages: [{ msg: "Trend detected: 'somatic healing journal prompts' — score 87/100", detail: "Velocity: +210% WoW · Competition: Medium · Est. monthly revenue: $1,450" }] },
-    { level: "action",  messages: [{ msg: "Brief dispatched → Digital Products Agent", detail: "Niche: 'AI coloring books for adults' · Priority: HIGH" }] },
-    { level: "info",    messages: [{ msg: "Scanning Reddit r/passive_income, r/KDP, r/digitalmarketing...", detail: "Parsing 1,200 posts from last 48h" }] },
-    { level: "success", messages: [{ msg: "Trend detected: 'minimalist budget planner 2026' — score 84/100", detail: "Velocity: +180% WoW · Competition: Low · Est. monthly revenue: $980" }] },
-    { level: "action",  messages: [{ msg: "Brief dispatched → Video Agent", detail: "Niche: 'minimalist budget planner 2026' · Format: Short-form" }] },
-    { level: "info",    messages: [{ msg: "TikTok trend scan complete — 23 rising audio tracks identified", detail: "Top audio: 'Lo-fi study beats' · 2.1M uses this week" }] },
-    { level: "warn",    messages: [{ msg: "Niche 'crypto trading bots' flagged — high competition (score: 34)", detail: "Skipping: 847 competing KDP titles published in last 30 days" }] },
-    { level: "success", messages: [{ msg: "Daily brief batch complete — 14 briefs generated", detail: "HIGH priority: 3 · MEDIUM: 8 · LOW: 3 · Total LLM cost: $0.28" }] },
-  ],
-  digital: [
-    { level: "info",    messages: [{ msg: "Received brief: 'AI coloring books for adults'", detail: "Starting content pipeline..." }] },
-    { level: "action",  messages: [{ msg: "Generating ebook outline — 24 chapters, 8,400 words", detail: "Model: gpt-4o-mini · Est. cost: $0.08" }] },
-    { level: "success", messages: [{ msg: "Outline complete — generating full manuscript...", detail: "8,412 words written in 34s · Cost: $0.07" }] },
-    { level: "action",  messages: [{ msg: "Requesting cover image from WaveSpeed FLUX...", detail: "Prompt: 'Elegant adult coloring book cover, mandala patterns, soft gold and teal palette'" }] },
-    { level: "success", messages: [{ msg: "Cover generated — 1024×1024px FLUX image", detail: "Generation time: 8.2s · Cost: $0.04 · Saved: output/covers/acb_001.png" }] },
-    { level: "action",  messages: [{ msg: "Compiling PDF — ReportLab rendering 24 chapters + cover", detail: "Adding KDP-compliant margins, ISBN placeholder, copyright page" }] },
-    { level: "success", messages: [{ msg: "PDF compiled — 'The AI Coloring Companion Vol.1.pdf' (4.2MB)", detail: "Ready for KDP upload · Saved: output/products/acb_001.pdf" }] },
-    { level: "action",  messages: [{ msg: "Writing KDP listing metadata...", detail: "Title, subtitle, 7 keywords, BISAC category, description (400 words)" }] },
-    { level: "success", messages: [{ msg: "Product complete — queued for KDP upload", detail: "Total pipeline cost: $0.31 · Time: 2m 14s · Product #47 today" }] },
-    { level: "info",    messages: [{ msg: "Starting next brief: 'somatic healing journal prompts'", detail: "Queue depth: 8 briefs remaining" }] },
-    { level: "success", messages: [{ msg: "Batch complete — 12 products generated today", detail: "Total cost: $3.72 · Avg per product: $0.31 · Queued for upload: 12" }] },
-  ],
-  video: [
-    { level: "info",    messages: [{ msg: "Received brief: 'minimalist budget planner 2026'", detail: "Format: TikTok/Reels/Shorts · Target length: 45s" }] },
-    { level: "action",  messages: [{ msg: "Generating viral script — hook + 3 scenes + CTA", detail: "Trend angle: 'I saved $4,200 in 90 days using this system'" }] },
-    { level: "success", messages: [{ msg: "Script complete — hook score: 94/100", detail: "Hook: 'This $7 planner made me $4,200 richer in 90 days' · CTA: affiliate link" }] },
-    { level: "action",  messages: [{ msg: "Generating 6 scene images via WaveSpeed FLUX...", detail: "Scene 1/6: 'Minimalist desk setup, open planner, morning light'" }] },
-    { level: "success", messages: [{ msg: "Scene images complete — 6/6 generated", detail: "Total image cost: $0.24 · Avg generation: 7.1s per image" }] },
-    { level: "action",  messages: [{ msg: "Requesting voiceover from ElevenLabs TTS...", detail: "Voice: Rachel (conversational) · Length: 43s · Cost: $0.06" }] },
-    { level: "success", messages: [{ msg: "Voiceover complete — 43s audio generated", detail: "Saved: output/audio/vid_031_vo.mp3" }] },
-    { level: "action",  messages: [{ msg: "Assembling final video with ffmpeg...", detail: "Combining 6 scenes + voiceover + captions + affiliate link overlay" }] },
-    { level: "success", messages: [{ msg: "Video assembled — 'budget_planner_2026_v1.mp4' (18.4MB)", detail: "Duration: 43s · Resolution: 1080×1920 · Ready for upload" }] },
-    { level: "action",  messages: [{ msg: "Posting to TikTok, YouTube Shorts, Instagram Reels...", detail: "Caption includes affiliate link: amzn.to/3xKp9Qm · 5 hashtags" }] },
-    { level: "success", messages: [{ msg: "Video published across 3 platforms", detail: "TikTok: ✓ · YouTube Shorts: ✓ · Instagram Reels: ✓ · Total cost: $0.37" }] },
-  ],
-  ecom: [
-    { level: "info",    messages: [{ msg: "Scanning Shopify trending products — AliExpress BSR analysis", detail: "Checking 340 products across 18 categories" }] },
-    { level: "success", messages: [{ msg: "Product identified: 'LED sunset lamp' — demand score 88", detail: "AliExpress price: $4.20 · Target sell price: $24.99 · Margin: 83%" }] },
-    { level: "action",  messages: [{ msg: "Generating 4 product images via WaveSpeed FLUX...", detail: "Lifestyle shots: bedroom, desk, living room + white background" }] },
-    { level: "success", messages: [{ msg: "Product listing created — 'Ambient Sunset Projection Lamp'", detail: "Title optimised · 5 bullet points · 847-word description · SEO score: 91" }] },
-    { level: "action",  messages: [{ msg: "Listing pushed to Shopify store", detail: "Product ID: #1047 · Price: $24.99 · Inventory: dropship (unlimited)" }] },
-    { level: "success", messages: [{ msg: "Sale recorded — Order #1089 · $24.99", detail: "Customer: US · Profit after COGS: $20.79 · Fulfillment: AliExpress auto" }] },
-  ],
-  blog: [
-    { level: "info",    messages: [{ msg: "Keyword research: 'best AI tools for passive income 2026'", detail: "Search volume: 8,100/mo · KD: 28 · CPC: $1.40" }] },
-    { level: "action",  messages: [{ msg: "Generating 1,800-word SEO article...", detail: "H1 + 6 H2s + internal links + affiliate placements" }] },
-    { level: "success", messages: [{ msg: "Article published — 'knxwlabs.com/ai-passive-income-2026'", detail: "Words: 1,847 · Images: 3 · Affiliate links: 4 · Cost: $0.09" }] },
-    { level: "success", messages: [{ msg: "AdSense impression recorded — RPM: $3.20", detail: "Page views today: 142 · Est. daily AdSense: $0.45" }] },
-  ],
-  ads: [
-    { level: "info",    messages: [{ msg: "Monitoring all vertical ROAS — daily performance review", detail: "Checking 12 active campaigns across TikTok Ads + Meta Ads" }] },
-    { level: "success", messages: [{ msg: "Top performer: 'budget_planner_2026_v1' — ROAS 4.7×", detail: "Spend: $12.40 · Revenue: $58.28 · Scaling budget +25%" }] },
-    { level: "warn",    messages: [{ msg: "Campaign 'sunset_lamp_v2' underperforming — ROAS 1.2×", detail: "Pausing campaign · Reallocating $8/day to top performers" }] },
-  ],
-  orchestrator: [
-    { level: "info",    messages: [{ msg: "Daily performance review initiated — 06:00 UTC", detail: "Analysing 8 verticals · 47 products · 31 videos · 12 blog posts" }] },
-    { level: "success", messages: [{ msg: "Capital allocation updated — routing $3.20 to Digital Agent", detail: "ROI rank: Digital (4.2×) > Video (3.8×) > Blog (2.1×) > Ecom (1.9×)" }] },
-    { level: "action",  messages: [{ msg: "Scheduled: Trend Agent scan in 2h 14m", detail: "Next full scan: 08:14 UTC · Partial scan: 07:00 UTC" }] },
-    { level: "success", messages: [{ msg: "Weekly self-improvement loop complete", detail: "Adjusted: ebook hit rate model +3% · Video hook scoring recalibrated" }] },
-    { level: "info",    messages: [{ msg: "System health check — all agents nominal", detail: "API quotas: OpenAI 12% · WaveSpeed 8% · No errors in last 24h" }] },
-    { level: "success", messages: [{ msg: "Revenue milestone: $1,000 cumulative reached", detail: "Day 23 · Avg daily revenue: $43.48 · On track for $1,304/mo pace" }] },
-  ],
+// Map backend agent IDs to display info
+const AGENT_DISPLAY: Record<string, { name: string; color: string }> = {
+  "trend-intelligence": { name: "Trend Intelligence", color: "#00d4ff" },
+  "digital-products": { name: "Digital Products", color: "#a855f7" },
+  "short-form-video": { name: "Short-Form Video", color: "#f97316" },
+  "seo-content": { name: "SEO Content", color: "#eab308" },
+  "email-marketing": { name: "Email Marketing", color: "#22c55e" },
+  "ad-creative": { name: "Ad Creative", color: "#ec4899" },
+  "analytics": { name: "Analytics", color: "#06b6d4" },
+  "master-orchestrator": { name: "Master Orchestrator", color: "#f43f5e" },
 };
 
 let _logCounter = 0;
-
-function generateLog(agentId: string): LogEntry {
-  const agent = AGENTS.find(a => a.id === agentId);
-  if (!agent) return { id: ++_logCounter, ts: "", agentId, agentName: agentId, agentColor: "#fff", level: "info", message: "" };
-  const templates = LOG_TEMPLATES[agentId] ?? LOG_TEMPLATES.orchestrator;
-  const template = templates[Math.floor(Math.random() * templates.length)];
-  const entry = template.messages[Math.floor(Math.random() * template.messages.length)];
-  const now = new Date();
-  const ts = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}:${String(now.getSeconds()).padStart(2,"0")}.${String(now.getMilliseconds()).padStart(3,"0")}`;
-  return {
-    id: ++_logCounter,
-    ts,
-    agentId,
-    agentName: agent.name.replace(" Agent", ""),
-    agentColor: agent.color,
-    level: template.level,
-    message: entry.msg,
-    detail: entry.detail,
-  };
-}
 
 // ─── LiveFeedPanel ─────────────────────────────────────────────────────────────
 
@@ -374,42 +319,85 @@ const LEVEL_STYLES: Record<LogLevel, { dot: string; text: string; label: string 
   action:  { dot: "bg-violet-400",  text: "text-violet-300",  label: "ACT" },
 };
 
-const ACTIVE_AGENT_IDS = ["trend", "digital", "video", "orchestrator"];
-const ALL_AGENT_IDS = ["trend", "digital", "video", "ecom", "blog", "ads", "orchestrator"];
+const ALL_AGENT_IDS = Object.keys(AGENT_DISPLAY);
 
 function LiveFeedPanel() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [running, setRunning] = useState(true);
+  const [connected, setConnected] = useState(false);
   const [filterAgent, setFilterAgent] = useState<string>("all");
   const [filterLevel, setFilterLevel] = useState<string>("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Seed initial logs
+  // Fetch historical logs on mount
   useEffect(() => {
-    const initial: LogEntry[] = [];
-    for (let i = 0; i < 18; i++) {
-      const agentId = ACTIVE_AGENT_IDS[i % ACTIVE_AGENT_IDS.length];
-      initial.push(generateLog(agentId));
-    }
-    setLogs(initial);
+    fetch("/api/logs?limit=100")
+      .then(r => r.json())
+      .then((data: Array<{ agent_id: string; level: string; message: string; data: string | null; created_at: string }>) => {
+        const entries: LogEntry[] = data.reverse().map(row => {
+          const display = AGENT_DISPLAY[row.agent_id] || { name: row.agent_id, color: "#888" };
+          const dt = new Date(row.created_at + "Z");
+          const ts = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}:${String(dt.getSeconds()).padStart(2, "0")}`;
+          return {
+            id: ++_logCounter,
+            ts,
+            agentId: row.agent_id,
+            agentName: display.name,
+            agentColor: display.color,
+            level: (row.level as LogLevel) || "info",
+            message: row.message,
+            detail: row.data ? String(row.data) : undefined,
+          };
+        });
+        setLogs(entries);
+      })
+      .catch(() => {});
   }, []);
 
-  // Live simulation — random agent fires every 1.2–3.5s
+  // SSE connection to real backend
   useEffect(() => {
-    if (!running) return;
-    const fire = () => {
-      const agentId = ACTIVE_AGENT_IDS[Math.floor(Math.random() * ACTIVE_AGENT_IDS.length)];
-      setLogs(prev => {
-        const next = [...prev, generateLog(agentId)];
-        return next.length > 300 ? next.slice(-300) : next;
-      });
+    const es = new EventSource("/api/logs/stream");
+    eventSourceRef.current = es;
+
+    es.onopen = () => setConnected(true);
+    es.onerror = () => setConnected(false);
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "connected") {
+          setConnected(true);
+          return;
+        }
+        if (data.type === "agent_status") return; // status updates handled elsewhere
+
+        const display = AGENT_DISPLAY[data.agent_id] || { name: data.agent_id, color: "#888" };
+        const now = new Date();
+        const ts = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`;
+
+        const entry: LogEntry = {
+          id: ++_logCounter,
+          ts,
+          agentId: data.agent_id,
+          agentName: display.name,
+          agentColor: display.color,
+          level: data.level || "info",
+          message: data.message,
+          detail: data.data ? JSON.stringify(data.data) : undefined,
+        };
+
+        setLogs(prev => {
+          const next = [...prev, entry];
+          return next.length > 500 ? next.slice(-500) : next;
+        });
+      } catch {}
     };
-    const interval = setInterval(fire, 1200 + Math.random() * 2300);
-    return () => clearInterval(interval);
-  }, [running]);
+
+    return () => es.close();
+  }, []);
 
   // Auto-scroll
   useEffect(() => {
@@ -439,23 +427,11 @@ function LiveFeedPanel() {
       <div className="flex flex-wrap items-center gap-3 p-4 glass-card rounded-xl border border-white/8">
         {/* Status */}
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${running ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
-          <span className="text-xs font-mono text-zinc-400">{running ? "LIVE" : "PAUSED"}</span>
+          <div className={`w-2 h-2 rounded-full ${connected ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`} />
+          <span className="text-xs font-mono text-zinc-400">{connected ? "LIVE — SSE" : "DISCONNECTED"}</span>
         </div>
 
         <div className="h-4 w-px bg-white/10" />
-
-        {/* Play/Pause */}
-        <button
-          onClick={() => setRunning(r => !r)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
-            running
-              ? "bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25"
-              : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25"
-          }`}
-        >
-          {running ? <><Pause size={11} /> Pause</> : <><Play size={11} /> Resume</>}
-        </button>
 
         {/* Clear */}
         <button
@@ -478,7 +454,7 @@ function LiveFeedPanel() {
           >
             <option value="all">All Agents</option>
             {ALL_AGENT_IDS.map(id => (
-              <option key={id} value={id}>{agentForId(id)?.name.replace(" Agent", "") ?? id}</option>
+              <option key={id} value={id}>{AGENT_DISPLAY[id]?.name ?? id}</option>
             ))}
           </select>
         </div>
@@ -523,10 +499,10 @@ function LiveFeedPanel() {
             <div className="w-3 h-3 rounded-full bg-amber-500/70" />
             <div className="w-3 h-3 rounded-full bg-emerald-500/70" />
           </div>
-          <span className="text-[10px] font-mono text-zinc-500 ml-2">knxw-labs — agent-log-stream</span>
+          <span className="text-[10px] font-mono text-zinc-500 ml-2">knxw-labs — agent-log-stream (real)</span>
           <div className="ml-auto flex items-center gap-1.5">
-            {running ? <Wifi size={11} className="text-emerald-400" /> : <WifiOff size={11} className="text-zinc-500" />}
-            <span className="text-[10px] font-mono text-zinc-600">{running ? "streaming" : "paused"}</span>
+            {connected ? <Wifi size={11} className="text-emerald-400" /> : <WifiOff size={11} className="text-zinc-500" />}
+            <span className="text-[10px] font-mono text-zinc-600">{connected ? "streaming" : "disconnected"}</span>
           </div>
         </div>
 
@@ -597,13 +573,13 @@ function LiveFeedPanel() {
 
       {/* Agent activity summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {ACTIVE_AGENT_IDS.map(id => {
-          const agent = agentForId(id);
+        {["trend-intelligence", "digital-products", "short-form-video", "master-orchestrator"].map(id => {
+          const agent = AGENT_DISPLAY[id];
           if (!agent) return null;
           const agentLogs = logs.filter(l => l.agentId === id);
           const successes = agentLogs.filter(l => l.level === "success").length;
-          const actions = agentLogs.filter(l => l.level === "action").length;
-          const warns = agentLogs.filter(l => l.level === "warn").length;
+          const actions = agentLogs.filter(l => l.level === "info").length;
+          const warns = agentLogs.filter(l => l.level === "warn" || l.level === "error").length;
           return (
             <div key={id} className="glass-card rounded-xl border border-white/8 p-3">
               <div className="flex items-center gap-2 mb-2">
@@ -636,13 +612,16 @@ function LiveFeedPanel() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: Agent["status"] }) {
-  const config = {
+function StatusBadge({ status }: { status: string }) {
+  const config: Record<string, { label: string; color: string }> = {
     active:  { label: "ACTIVE",  color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30" },
+    running: { label: "RUNNING", color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30 animate-pulse" },
+    idle:    { label: "IDLE",    color: "text-sky-400 bg-sky-400/10 border-sky-400/30" },
     ready:   { label: "READY",   color: "text-sky-400 bg-sky-400/10 border-sky-400/30" },
+    error:   { label: "ERROR",   color: "text-red-400 bg-red-400/10 border-red-400/30" },
     pending: { label: "PENDING", color: "text-zinc-400 bg-zinc-400/10 border-zinc-400/30" },
   };
-  const c = config[status];
+  const c = config[status] || config.pending;
   return (
     <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${c.color}`}>
       {c.label}
@@ -673,8 +652,52 @@ function CodeBlock({ code }: { code: string }) {
   );
 }
 
-function AgentCard({ agent }: { agent: Agent }) {
+// Map frontend agent IDs to backend IDs
+const AGENT_BACKEND_ID: Record<string, string> = {
+  trend: "trend-intelligence",
+  digital: "digital-products",
+  video: "short-form-video",
+  orchestrator: "master-orchestrator",
+};
+
+function AgentCard({ agent, backendStatus, onRefresh }: { agent: Agent; backendStatus?: string; onRefresh?: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const backendId = AGENT_BACKEND_ID[agent.id];
+  const isRunnable = !!backendId;
+  const isRunning = backendStatus === "running";
+
+  const handleRun = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!backendId || loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/agents/${backendId}/run`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) alert(data.error || "Failed to start agent");
+    } catch (err) {
+      alert("Failed to connect to backend");
+    } finally {
+      setLoading(false);
+      onRefresh?.();
+    }
+  };
+
+  const handleStop = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!backendId || loading) return;
+    setLoading(true);
+    try {
+      await fetch(`/api/agents/${backendId}/stop`, { method: "POST" });
+    } catch {} finally {
+      setLoading(false);
+      onRefresh?.();
+    }
+  };
+
+  const displayStatus = backendStatus || agent.status;
+
   return (
     <div
       className="glass-card rounded-xl border border-white/8 p-4 cursor-pointer hover:border-white/20 transition-all duration-200"
@@ -690,17 +713,38 @@ function AgentCard({ agent }: { agent: Agent }) {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-semibold text-sm text-white">{agent.name}</span>
-              <StatusBadge status={agent.status} />
+              <StatusBadge status={displayStatus} />
             </div>
             <div className="text-xs text-zinc-500 mt-0.5 font-mono">
               Phase {agent.phase} · Activates {agent.activatesAt}
             </div>
           </div>
         </div>
-        <ChevronRight
-          size={16}
-          className={`text-zinc-500 shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
-        />
+        <div className="flex items-center gap-2">
+          {isRunnable && (
+            isRunning ? (
+              <button
+                onClick={handleStop}
+                disabled={loading}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-all"
+              >
+                <Square size={9} /> Stop
+              </button>
+            ) : (
+              <button
+                onClick={handleRun}
+                disabled={loading}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all"
+              >
+                <Play size={9} /> Run
+              </button>
+            )
+          )}
+          <ChevronRight
+            size={16}
+            className={`text-zinc-500 shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+          />
+        </div>
       </div>
 
       {expanded && (
@@ -770,6 +814,25 @@ function SetupStepRow({ step, index }: { step: SetupStep; index: number }) {
 
 export default function CommandDashboard() {
   const [activeTab, setActiveTab] = useState<"agents" | "setup" | "architecture" | "costs" | "livefeed">("agents");
+  const [backendAgents, setBackendAgents] = useState<BackendAgent[]>([]);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+
+  const fetchBackendState = useCallback(() => {
+    fetch("/api/agents").then(r => r.json()).then(setBackendAgents).catch(() => {});
+    fetch("/api/status").then(r => r.json()).then(setSystemStatus).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchBackendState();
+    const interval = setInterval(fetchBackendState, 3000);
+    return () => clearInterval(interval);
+  }, [fetchBackendState]);
+
+  const getBackendStatus = (frontendId: string): string | undefined => {
+    const backendId = AGENT_BACKEND_ID[frontendId];
+    if (!backendId) return undefined;
+    return backendAgents.find(a => a.id === backendId)?.status;
+  };
 
   const phaseAgents = (phase: number) => AGENTS.filter(a => a.phase === phase);
 
@@ -777,7 +840,7 @@ export default function CommandDashboard() {
     <div className="min-h-screen bg-[#080b14] text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
 
       {/* Header */}
-      <div className="border-b border-white/8 bg-black/30 backdrop-blur-sm sticky top-0 z-20">
+      <div className="border-b border-white/8 bg-black/30 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-violet-600 flex items-center justify-center">
@@ -788,9 +851,20 @@ export default function CommandDashboard() {
               <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Command Dashboard</div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-mono text-zinc-400">System Ready</span>
+          <div className="flex items-center gap-3">
+            {systemStatus && (
+              <>
+                <span className="text-[10px] font-mono text-zinc-500">
+                  {systemStatus.logs} logs · {systemStatus.products} products · {systemStatus.trends} trends
+                </span>
+                <div className="h-3 w-px bg-white/10" />
+                <span className={`text-[10px] font-mono ${systemStatus.openai_configured ? "text-emerald-400" : "text-red-400"}`}>
+                  OpenAI {systemStatus.openai_configured ? "OK" : "N/A"}
+                </span>
+              </>
+            )}
+            <div className={`w-2 h-2 rounded-full ${systemStatus?.status === "ok" ? "bg-emerald-400 animate-pulse" : "bg-zinc-500"}`} />
+            <span className="text-xs font-mono text-zinc-400">{systemStatus?.status === "ok" ? "Backend Online" : "Connecting..."}</span>
           </div>
         </div>
       </div>
@@ -800,10 +874,10 @@ export default function CommandDashboard() {
         {/* Hero KPI row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           {[
-            { label: "Active Agents",    value: "3",     sub: "Phase 1 online",       color: "#00d4ff", icon: <Bot size={16} /> },
-            { label: "Ready Agents",     value: "2",     sub: "Phases 2–3 ready",     color: "#a855f7", icon: <Layers size={16} /> },
-            { label: "Verticals",        value: "8",     sub: "Across 5 phases",      color: "#f97316", icon: <BarChart3 size={16} /> },
-            { label: "Starting Capital", value: "$100",  sub: "Full autonomy",        color: "#22c55e", icon: <Shield size={16} /> },
+            { label: "Total Agents",     value: String(systemStatus?.agents ?? 8), sub: `${systemStatus?.running_agents.length ?? 0} running`, color: "#00d4ff", icon: <Bot size={16} /> },
+            { label: "Log Entries",      value: String(systemStatus?.logs ?? 0),    sub: "Real agent output",    color: "#a855f7", icon: <Layers size={16} /> },
+            { label: "Products",         value: String(systemStatus?.products ?? 0), sub: "Generated products",   color: "#f97316", icon: <BarChart3 size={16} /> },
+            { label: "Trends",           value: String(systemStatus?.trends ?? 0),  sub: "Discovered niches",    color: "#22c55e", icon: <Shield size={16} /> },
           ].map(k => (
             <div key={k.label} className="glass-card rounded-xl border border-white/8 p-4">
               <div className="flex items-center justify-between mb-2">
@@ -861,7 +935,7 @@ export default function CommandDashboard() {
                     <div className="h-px flex-1 bg-white/8" />
                   </div>
                   <div className="grid gap-3">
-                    {agents.map(a => <AgentCard key={a.id} agent={a} />)}
+                    {agents.map(a => <AgentCard key={a.id} agent={a} backendStatus={getBackendStatus(a.id)} onRefresh={fetchBackendState} />)}
                   </div>
                 </div>
               );
