@@ -1,6 +1,6 @@
 import { BaseAgent } from "./base.js";
 import { getDb } from "../db/schema.js";
-import { createAIClient, completionOptions, extractJSON, aiBackendName } from "./aiClient.js";
+import { createAIClient, completionOptions, safeParseJSON, aiBackendName, isLocalAI } from "./aiClient.js";
 
 const WAVESPEED_API = "https://api.wavespeed.ai/api/v3";
 const WAVESPEED_TEXT2IMG = `${WAVESPEED_API}/google/nano-banana-2/text-to-image-fast`;
@@ -61,7 +61,7 @@ Respond with ONLY this JSON structure (no other text):
   "estimated_duration_seconds": 30
 }
 
-Include exactly 4 scenes.`,
+Include exactly ${isLocalAI ? 3 : 4} scenes.`,
           },
         ],
       }),
@@ -70,7 +70,8 @@ Include exactly 4 scenes.`,
     const scriptRaw = scriptCompletion.choices[0]?.message?.content;
     if (!scriptRaw) throw new Error(`No script response from ${aiBackendName}`);
 
-    const script = JSON.parse(extractJSON(scriptRaw));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const script = safeParseJSON<Record<string, any>>(scriptRaw, "video script");
     this.info(`Script created: "${script.title}" — ${script.scenes?.length || 0} scenes, ~${script.estimated_duration_seconds || 30}s`, {
       hook: script.hook,
       scenes: script.scenes?.length,

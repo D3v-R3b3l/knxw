@@ -1,6 +1,6 @@
 import { BaseAgent } from "./base.js";
 import { getDb } from "../db/schema.js";
-import { createAIClient, completionOptions, extractJSON, aiBackendName } from "./aiClient.js";
+import { createAIClient, completionOptions, safeParseJSON, aiBackendName } from "./aiClient.js";
 
 export class TrendIntelligenceAgent extends BaseAgent {
   constructor() {
@@ -60,8 +60,8 @@ Respond with ONLY this JSON structure (no other text):
     }
 
     this.info("Parsing trend data from AI response...");
-    const cleaned = extractJSON(raw);
-    const parsed = JSON.parse(cleaned);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsed = safeParseJSON<Record<string, any>>(raw, "trend analysis");
     const trends: Array<{ keyword: string; score: number; source: string; analysis: string }> =
       parsed.trends || parsed.niches || parsed.results || (Array.isArray(parsed) ? parsed : []);
 

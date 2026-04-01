@@ -1,6 +1,6 @@
 import { BaseAgent } from "./base.js";
 import { getDb } from "../db/schema.js";
-import { createAIClient, completionOptions, extractJSON, aiBackendName } from "./aiClient.js";
+import { createAIClient, completionOptions, safeParseJSON, aiBackendName, isLocalAI } from "./aiClient.js";
 
 const WAVESPEED_API = "https://api.wavespeed.ai/api/v3";
 const WAVESPEED_TEXT2IMG = `${WAVESPEED_API}/google/nano-banana-2/text-to-image-fast`;
@@ -54,7 +54,7 @@ Respond with ONLY this JSON structure (no other text):
   "price_point": "14.99"
 }
 
-Include exactly 5 chapters.`,
+Include exactly ${isLocalAI ? 3 : 5} chapters.`,
           },
         ],
       }),
@@ -63,7 +63,8 @@ Include exactly 5 chapters.`,
     const outlineRaw = outlineCompletion.choices[0]?.message?.content;
     if (!outlineRaw) throw new Error(`No outline response from ${aiBackendName}`);
 
-    const outline = JSON.parse(extractJSON(outlineRaw));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const outline = safeParseJSON<Record<string, any>>(outlineRaw, "ebook outline");
     this.info(`Ebook outline: "${outline.title}"`, { chapters: outline.chapters?.length || 0, price: outline.price_point });
 
     // 3. Generate first chapter content

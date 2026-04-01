@@ -54,6 +54,66 @@ export function extractJSON(text: string): string {
 }
 
 /**
+ * Attempt to repair common JSON errors produced by local models:
+ * - Trailing commas before } or ]
+ * - Missing commas between array/object elements
+ * - Truncated arrays/objects (add closing brackets)
+ * - Single quotes instead of double quotes
+ */
+export function repairJSON(text: string): string {
+  let s = text;
+
+  // Replace single-quoted strings with double-quoted (naive but effective)
+  s = s.replace(/'([^'\n]*)'/g, '"$1"');
+
+  // Remove trailing commas before closing brackets
+  s = s.replace(/,\s*([}\]])/g, '$1');
+
+  // Add missing commas between }{ or }" or ]" or "" patterns on separate lines
+  s = s.replace(/}\s*\n\s*{/g, '},\n{');
+  s = s.replace(/}\s*\n\s*"/g, '},\n"');
+  s = s.replace(/"\s*\n\s*"/g, '",\n"');
+  s = s.replace(/]\s*\n\s*"/g, '],\n"');
+  s = s.replace(/(\d)\s*\n\s*"/g, '$1,\n"');
+
+  // Balance brackets — count opens vs closes and append if needed
+  const openBraces = (s.match(/{/g) || []).length;
+  const closeBraces = (s.match(/}/g) || []).length;
+  const openBrackets = (s.match(/\[/g) || []).length;
+  const closeBrackets = (s.match(/]/g) || []).length;
+
+  for (let i = 0; i < openBrackets - closeBrackets; i++) s += ']';
+  for (let i = 0; i < openBraces - closeBraces; i++) s += '}';
+
+  // Remove trailing commas again after repairs
+  s = s.replace(/,\s*([}\]])/g, '$1');
+
+  return s;
+}
+
+/**
+ * Parse JSON from AI response with automatic extraction and repair.
+ * Tries strict parse first, then repair, then throws with helpful message.
+ */
+export function safeParseJSON<T = unknown>(raw: string, context?: string): T {
+  const extracted = extractJSON(raw);
+
+  // Try strict parse first
+  try {
+    return JSON.parse(extracted) as T;
+  } catch (_firstErr) {
+    // Try with repair
+    try {
+      const repaired = repairJSON(extracted);
+      return JSON.parse(repaired) as T;
+    } catch (_repairErr) {
+      const preview = extracted.slice(0, 200);
+      throw new Error(`JSON parse failed${context ? ` (${context})` : ''}: ${(_firstErr as Error).message}\nResponse preview: ${preview}`);
+    }
+  }
+}
+
+/**
  * Build chat completion options, adapting for local vs cloud models.
  * Local models: no response_format (unreliable), lower max_tokens, explicit JSON instructions.
  * Cloud models: use response_format: json_object for reliable structured output.
