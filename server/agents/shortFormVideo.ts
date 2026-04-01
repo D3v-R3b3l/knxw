@@ -1,6 +1,6 @@
-import OpenAI from "openai";
 import { BaseAgent } from "./base.js";
 import { getDb } from "../db/schema.js";
+import { createAIClient, completionOptions, extractJSON, aiBackendName } from "./aiClient.js";
 
 const WAVESPEED_API = "https://api.wavespeed.ai/api/v3";
 const WAVESPEED_TEXT2IMG = `${WAVESPEED_API}/google/nano-banana-2/text-to-image-fast`;
@@ -9,15 +9,13 @@ const WAVESPEED_POLL_INTERVAL = 2000;
 const WAVESPEED_MAX_POLLS = 30;
 
 export class ShortFormVideoAgent extends BaseAgent {
-  private openai: OpenAI;
-
   constructor() {
     super("short-form-video", "Short-Form Video Agent");
-    this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
 
   async run(): Promise<void> {
-    this.info("Starting short-form video content pipeline...");
+    const ai = createAIClient();
+    this.info(`Starting short-form video content pipeline (via ${aiBackendName})...`);
 
     // 1. Pick a trending topic
     const db = getDb();
@@ -28,37 +26,51 @@ export class ShortFormVideoAgent extends BaseAgent {
     const topic = trend?.keyword || "AI tools that save 10 hours per week";
     this.info(`Creating video content for topic: "${topic}"`);
 
-    // 2. Generate video script with OpenAI
-    this.info("Generating TikTok/Reels script with OpenAI...");
-    const scriptCompletion = await this.openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a viral short-form video content creator. Create engaging 30-60 second scripts for TikTok and Instagram Reels. Return JSON only.",
-        },
-        {
-          role: "user",
-          content: `Create a viral TikTok/Reels script about "${topic}". Include:
-- title: catchy hook title
-- hook: first 3 seconds attention grabber (text overlay)
-- scenes: array of 4-5 scene objects with {scene_number, duration_seconds, visual_description, narration, text_overlay}
-- cta: call to action at the end
-- hashtags: array of 5-8 relevant hashtags
-- estimated_duration_seconds: total video length
+    // 2. Generate video script
+    this.info(`Generating TikTok/Reels script with ${aiBackendName}...`);
+    const scriptCompletion = await ai.chat.completions.create(
+      completionOptions({
+        json: true,
+        temperature: 0.8,
+        maxTokens: 1500,
+        messages: [
+          {
+            role: "system",
+            content: `You are a viral short-form video content creator. Create engaging 30-60 second scripts for TikTok and Instagram Reels.
+You MUST respond with ONLY a valid JSON object. No explanations, no markdown, no extra text.`,
+          },
+          {
+            role: "user",
+            content: `Create a viral TikTok/Reels script about "${topic}".
 
-Return as JSON object.`,
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.8,
-      max_tokens: 1500,
-    });
+Respond with ONLY this JSON structure (no other text):
+{
+  "title": "Catchy Hook Title",
+  "hook": "First 3 seconds attention grabber text overlay",
+  "scenes": [
+    {
+      "scene_number": 1,
+      "duration_seconds": 5,
+      "visual_description": "What the viewer sees",
+      "narration": "What is said",
+      "text_overlay": "On-screen text"
+    }
+  ],
+  "cta": "Call to action at the end",
+  "hashtags": ["#hashtag1", "#hashtag2"],
+  "estimated_duration_seconds": 30
+}
+
+Include exactly 4 scenes.`,
+          },
+        ],
+      }),
+    );
 
     const scriptRaw = scriptCompletion.choices[0]?.message?.content;
-    if (!scriptRaw) throw new Error("No script response from OpenAI");
+    if (!scriptRaw) throw new Error(`No script response from ${aiBackendName}`);
 
-    const script = JSON.parse(scriptRaw);
+    const script = JSON.parse(extractJSON(scriptRaw));
     this.info(`Script created: "${script.title}" — ${script.scenes?.length || 0} scenes, ~${script.estimated_duration_seconds || 30}s`, {
       hook: script.hook,
       scenes: script.scenes?.length,

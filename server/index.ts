@@ -9,6 +9,7 @@ import { DigitalProductsAgent } from "./agents/digitalProducts.js";
 import { ShortFormVideoAgent } from "./agents/shortFormVideo.js";
 import { MasterOrchestrator } from "./agents/masterOrchestrator.js";
 import type { BaseAgent } from "./agents/base.js";
+import { isLocalAI, aiModel, aiBackendName } from "./agents/aiClient.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,9 +67,9 @@ async function startServer() {
       return res.status(400).json({ error: `Agent "${agentId}" does not have a real implementation yet` });
     }
 
-    // Check for required API keys
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(400).json({ error: "OPENAI_API_KEY environment variable is not set" });
+    // Check for required API keys (local AI doesn't need OPENAI_API_KEY)
+    if (!process.env.OPENAI_API_KEY && !isLocalAI) {
+      return res.status(400).json({ error: "Set OPENAI_API_KEY or AI_BASE_URL (for Ollama/LocalAI) to run agents" });
     }
 
     // Start execution asynchronously
@@ -142,7 +143,10 @@ async function startServer() {
     const trendCount = db.prepare("SELECT COUNT(*) as c FROM trends").get() as { c: number };
     res.json({
       status: "ok",
+      ai_backend: aiBackendName,
+      ai_model: aiModel,
       openai_configured: !!process.env.OPENAI_API_KEY,
+      local_ai_configured: isLocalAI,
       wavespeed_configured: !!process.env.WAVESPEED_API_KEY,
       agents: agentCount.c,
       logs: logCount.c,
@@ -169,7 +173,9 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`API server running on http://localhost:${port}/`);
+    console.log(`AI Backend: ${aiBackendName} (model: ${aiModel})`);
     console.log(`OpenAI configured: ${!!process.env.OPENAI_API_KEY}`);
+    console.log(`Local AI configured: ${isLocalAI}`);
     console.log(`WaveSpeed configured: ${!!process.env.WAVESPEED_API_KEY}`);
   });
 }

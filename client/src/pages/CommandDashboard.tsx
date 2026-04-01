@@ -42,7 +42,10 @@ interface BackendAgent {
 
 interface SystemStatus {
   status: string;
+  ai_backend: string;
+  ai_model: string;
   openai_configured: boolean;
+  local_ai_configured: boolean;
   wavespeed_configured: boolean;
   agents: number;
   logs: number;
@@ -858,8 +861,10 @@ export default function CommandDashboard() {
                   {systemStatus.logs} logs · {systemStatus.products} products · {systemStatus.trends} trends
                 </span>
                 <div className="h-3 w-px bg-white/10" />
-                <span className={`text-[10px] font-mono ${systemStatus.openai_configured ? "text-emerald-400" : "text-red-400"}`}>
-                  OpenAI {systemStatus.openai_configured ? "OK" : "N/A"}
+                <span className={`text-[10px] font-mono ${(systemStatus.openai_configured || systemStatus.local_ai_configured) ? "text-emerald-400" : "text-red-400"}`}>
+                  {systemStatus.local_ai_configured
+                    ? `${systemStatus.ai_model} OK`
+                    : systemStatus.openai_configured ? "OpenAI OK" : "AI N/A"}
                 </span>
               </>
             )}

@@ -1,17 +1,15 @@
-import OpenAI from "openai";
 import { BaseAgent } from "./base.js";
 import { getDb } from "../db/schema.js";
+import { createAIClient, completionOptions, extractJSON, aiBackendName } from "./aiClient.js";
 
 export class TrendIntelligenceAgent extends BaseAgent {
-  private openai: OpenAI;
-
   constructor() {
     super("trend-intelligence", "Trend Intelligence Agent");
-    this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
 
   async run(): Promise<void> {
-    this.info("Scanning for emerging micro-niches across platforms...");
+    const ai = createAIClient();
+    this.info(`Scanning for emerging micro-niches (via ${aiBackendName})...`);
 
     const categories = [
       "AI tools and automation",
@@ -24,37 +22,46 @@ export class TrendIntelligenceAgent extends BaseAgent {
     const selectedCategory = categories[Math.floor(Math.random() * categories.length)];
     this.info(`Analyzing category: ${selectedCategory}`);
 
-    this.info("Querying OpenAI for trend analysis...");
-    const completion = await this.openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are a trend intelligence analyst specializing in digital economy opportunities. Analyze emerging micro-niches and score them by revenue potential. Return JSON only.`,
-        },
-        {
-          role: "user",
-          content: `Identify 5 trending micro-niches within "${selectedCategory}" that have high potential for digital product monetization in 2025-2026. For each, provide:
-- keyword: the specific niche keyword
-- score: revenue potential score 0-100
-- source: likely discovery platform (Google Trends / Reddit / TikTok / Twitter)
-- analysis: 2-sentence analysis of why this is trending and monetization approach
+    this.info(`Querying ${aiBackendName} for trend analysis...`);
+    const completion = await ai.chat.completions.create(
+      completionOptions({
+        json: true,
+        temperature: 0.8,
+        maxTokens: 1500,
+        messages: [
+          {
+            role: "system",
+            content: `You are a trend intelligence analyst specializing in digital economy opportunities. Analyze emerging micro-niches and score them by revenue potential.
+You MUST respond with ONLY a valid JSON object. No explanations, no markdown, no extra text.`,
+          },
+          {
+            role: "user",
+            content: `Identify 3 trending micro-niches within "${selectedCategory}" that have high potential for digital product monetization in 2025-2026.
 
-Return as JSON array.`,
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.8,
-      max_tokens: 1500,
-    });
+Respond with ONLY this JSON structure (no other text):
+{
+  "trends": [
+    {
+      "keyword": "specific niche keyword",
+      "score": 85,
+      "source": "Google Trends",
+      "analysis": "Two sentence analysis of why this trends and how to monetize it."
+    }
+  ]
+}`,
+          },
+        ],
+      }),
+    );
 
     const raw = completion.choices[0]?.message?.content;
     if (!raw) {
-      throw new Error("No response from OpenAI");
+      throw new Error(`No response from ${aiBackendName}`);
     }
 
-    this.info("Parsing trend data from OpenAI response...");
-    const parsed = JSON.parse(raw);
+    this.info("Parsing trend data from AI response...");
+    const cleaned = extractJSON(raw);
+    const parsed = JSON.parse(cleaned);
     const trends: Array<{ keyword: string; score: number; source: string; analysis: string }> =
       parsed.trends || parsed.niches || parsed.results || (Array.isArray(parsed) ? parsed : []);
 
@@ -62,7 +69,7 @@ Return as JSON array.`,
       this.warn("No trends extracted from response, storing raw analysis");
       const db = getDb();
       db.prepare("INSERT INTO trends (keyword, score, source, analysis) VALUES (?, ?, ?, ?)").run(
-        selectedCategory, 50, "OpenAI", raw.slice(0, 2000),
+        selectedCategory, 50, aiBackendName, raw.slice(0, 2000),
       );
       return;
     }
@@ -71,8 +78,8 @@ Return as JSON array.`,
     const insert = db.prepare("INSERT INTO trends (keyword, score, source, analysis) VALUES (?, ?, ?, ?)");
 
     for (const trend of trends) {
-      insert.run(trend.keyword, trend.score, trend.source, trend.analysis);
-      this.info(`Trend found: "${trend.keyword}" — score ${trend.score}/100 via ${trend.source}`, {
+      insert.run(trend.keyword, trend.score || 50, trend.source || aiBackendName, trend.analysis || "");
+      this.info(`Trend found: "${trend.keyword}" — score ${trend.score || 50}/100 via ${trend.source || "AI"}`, {
         keyword: trend.keyword,
         score: trend.score,
       });

@@ -1,6 +1,6 @@
-import OpenAI from "openai";
 import { BaseAgent } from "./base.js";
 import { getDb } from "../db/schema.js";
+import { createAIClient, completionOptions, extractJSON, aiBackendName } from "./aiClient.js";
 
 const WAVESPEED_API = "https://api.wavespeed.ai/api/v3";
 const WAVESPEED_TEXT2IMG = `${WAVESPEED_API}/google/nano-banana-2/text-to-image-fast`;
@@ -9,15 +9,13 @@ const WAVESPEED_POLL_INTERVAL = 2000;
 const WAVESPEED_MAX_POLLS = 30;
 
 export class DigitalProductsAgent extends BaseAgent {
-  private openai: OpenAI;
-
   constructor() {
     super("digital-products", "Digital Products Agent");
-    this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
 
   async run(): Promise<void> {
-    this.info("Starting digital product generation pipeline...");
+    const ai = createAIClient();
+    this.info(`Starting digital product generation pipeline (via ${aiBackendName})...`);
 
     // 1. Pick a trending topic from DB or fallback
     const db = getDb();
@@ -28,57 +26,66 @@ export class DigitalProductsAgent extends BaseAgent {
     const topic = trend?.keyword || "AI productivity tools for solopreneurs";
     this.info(`Generating digital product for topic: "${topic}"`);
 
-    // 2. Generate ebook outline with OpenAI
-    this.info("Generating ebook outline with OpenAI...");
-    const outlineCompletion = await this.openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a digital product creator specializing in ebooks and guides. Return JSON only.",
-        },
-        {
-          role: "user",
-          content: `Create a short ebook outline about "${topic}". Include:
-- title: catchy ebook title
-- subtitle: brief subtitle
-- chapters: array of 5 chapter objects with {title, summary} each
-- target_audience: who this is for
-- price_point: suggested price in USD
+    // 2. Generate ebook outline
+    this.info(`Generating ebook outline with ${aiBackendName}...`);
+    const outlineCompletion = await ai.chat.completions.create(
+      completionOptions({
+        json: true,
+        temperature: 0.7,
+        maxTokens: 1200,
+        messages: [
+          {
+            role: "system",
+            content: `You are a digital product creator specializing in ebooks and guides.
+You MUST respond with ONLY a valid JSON object. No explanations, no markdown, no extra text.`,
+          },
+          {
+            role: "user",
+            content: `Create a short ebook outline about "${topic}".
 
-Return as JSON object.`,
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.7,
-      max_tokens: 1200,
-    });
+Respond with ONLY this JSON structure (no other text):
+{
+  "title": "Catchy Ebook Title",
+  "subtitle": "Brief subtitle",
+  "chapters": [
+    {"title": "Chapter Title", "summary": "Brief chapter summary"}
+  ],
+  "target_audience": "Who this is for",
+  "price_point": "14.99"
+}
+
+Include exactly 5 chapters.`,
+          },
+        ],
+      }),
+    );
 
     const outlineRaw = outlineCompletion.choices[0]?.message?.content;
-    if (!outlineRaw) throw new Error("No outline response from OpenAI");
+    if (!outlineRaw) throw new Error(`No outline response from ${aiBackendName}`);
 
-    const outline = JSON.parse(outlineRaw);
+    const outline = JSON.parse(extractJSON(outlineRaw));
     this.info(`Ebook outline: "${outline.title}"`, { chapters: outline.chapters?.length || 0, price: outline.price_point });
 
     // 3. Generate first chapter content
-    this.info("Generating chapter 1 content with OpenAI...");
-    const chapterCompletion = await this.openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert ebook writer. Write engaging, actionable content.",
-        },
-        {
-          role: "user",
-          content: `Write chapter 1 of an ebook titled "${outline.title}" about "${topic}". 
+    this.info(`Generating chapter 1 content with ${aiBackendName}...`);
+    const chapterCompletion = await ai.chat.completions.create(
+      completionOptions({
+        temperature: 0.7,
+        maxTokens: 1000,
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert ebook writer. Write engaging, actionable content.",
+          },
+          {
+            role: "user",
+            content: `Write chapter 1 of an ebook titled "${outline.title}" about "${topic}". 
 Chapter title: "${outline.chapters?.[0]?.title || "Introduction"}".
 Write 400-600 words of high-quality content. Include practical tips and examples.`,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 1000,
-    });
+          },
+        ],
+      }),
+    );
 
     const chapterContent = chapterCompletion.choices[0]?.message?.content || "";
     this.info(`Chapter 1 generated: ${chapterContent.length} characters`);
